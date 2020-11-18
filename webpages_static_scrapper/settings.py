@@ -104,6 +104,8 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 REST_FRAMEWORK = {
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.LimitOffsetPagination',
+    'PAGE_SIZE': 100
     # 'DEFAULT_AUTHENTICATION_CLASSES': [
     #     'rest_framework.authentication.TokenAuthentication',
     # ],
@@ -134,10 +136,3 @@ USE_TZ = True
 STATIC_URL = '/static/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media/')
 MEDIA_ROOT_RESOURCES_RELATIVE = 'media/resources/{}/'
-
-# MEDIA_ROOT_TMP = 'resources/'
-# MEDIA_ROOT_TMP_ABSOLUTE = "/".join([str(MEDIA_ROOT), MEDIA_ROOT_TMP])
-#
-# if not os.path.exists(MEDIA_ROOT_TMP_ABSOLUTE):
-#     os.mkdir(MEDIA_ROOT_TMP_ABSOLUTE)
-#

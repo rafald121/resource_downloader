@@ -1,21 +1,18 @@
-import os
 import shutil
-import zipfile
-from datetime import timezone, datetime
+from urllib.error import URLError
 from wsgiref.util import FileWrapper
 
-from django.conf import settings
-from django.http import FileResponse, HttpResponse
-from django.shortcuts import render
+from django.http import HttpResponse
 
 # Create your views here.
+from django.utils.datetime_safe import datetime
 from rest_framework import mixins, renderers
 from rest_framework.decorators import api_view, action
-from rest_framework.generics import GenericAPIView
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet, GenericViewSet
 
-from scrapper.models import Text, Image, ResourceGeneration, Website
+from scrapper.models import Text, Image, ResourceGeneration, ResourceGenerationStatusChoices
 from scrapper.serializers import TextSerializer, ResourceGenerationCreateSerializer, ImageSerializer
 
 
@@ -56,6 +53,8 @@ class ImageResourcesViewSet(ViewSet):
 
 class GenerateResourcesViewSet(GenericViewSet, mixins.RetrieveModelMixin):
 
+    serializer_class = ResourceGenerationCreateSerializer
+
     def get_queryset(self):
         return ResourceGeneration.objects.all()
 
@@ -64,26 +63,53 @@ class GenerateResourcesViewSet(GenericViewSet, mixins.RetrieveModelMixin):
         serializer = ResourceGenerationCreateSerializer(data=request.POST)
         serializer.is_valid(raise_exception=True)
 
-        obj = serializer.save()
+        resource_generator = serializer.save()
 
-        result = obj.start()
-        if result:
-            obj.date_end = datetime.now()
+        try:
+            resource_generator.save_resources()
+        except (ValidationError, ValueError, URLError) as e:
+            response_msg = f"Error occurred: {e}"
+            resource_generator.status = ResourceGenerationStatusChoices.ERROR
+        except Exception as e:
+            response_msg = f"Unexpected error occurred: {e}"
+            resource_generator.status = ResourceGenerationStatusChoices.ERROR
+        else:
+            resource_generator.status = ResourceGenerationStatusChoices.GENERATED
+            response_msg = "Generated"
 
-        response_msg = f"Resources dispatched to be generated. Id: {obj.id}, Status: {obj.get_status_label()}"
+        resource_generator.date_end = datetime.now()
+        resource_generator.save()
 
-        return Response({"Result": response_msg})
+        response = {
+            "message": response_msg,
+            "id": f"{resource_generator.id}",
+            "status": f"{resource_generator.get_status_label()}",
+        }
 
-    @action(methods=['get'], detail=True, renderer_classes=(PassthroughRenderer,))
+        return Response(response)
+
+    @action(
+        detail=True,
+        methods=['GET'],
+        renderer_classes=(PassthroughRenderer, )
+    )
     def download(self, *args, **kwargs):
         instance = self.get_object()
+        if not instance.can_download():
+            return HttpResponse({"message": f"Resources with id: {instance.pk} were not generated properly so you cannot download it, try again"})
 
-        file_name = shutil.make_archive(
-            instance.get_relative_file_zipped_path(),
-            instance.FILE_FORMAT,
-            instance.directory
-        )
-        file = open(file_name, 'rb')
-        response = HttpResponse(FileWrapper(file), content_type='application/zip')
-        response['Content-Disposition'] = 'attachment; filename="%s"' % instance.get_file_zipped_name()
-        return response
+        try:
+            file_name = shutil.make_archive(
+                instance.get_relative_file_zipped_path(),
+                instance.FILE_FORMAT,
+                instance.directory
+            )
+        except FileNotFoundError:
+            return HttpResponse({"message": "Downloaded file's resources could not be found. Try to download it again"})
+
+        with open(file_name, 'rb') as file:
+
+            response = HttpResponse(FileWrapper(file), content_type='application/zip')
+            response['Content-Disposition'] = 'attachment; filename="%s"' % instance.get_file_zipped_name()
+
+            return response

@@ -1,37 +1,30 @@
 from rest_framework import serializers
 
-from scrapper.models import Text, Website, ResourceGeneration
-
-
-class WebsiteSerializer(serializers.ModelSerializer):
-
-    class Meta:
-        model = Website
-        fields = ['id', 'domain']
+from scrapper.models import Text, ResourceGeneration, Image
 
 
 class TextSerializer(serializers.ModelSerializer):
 
-    website = WebsiteSerializer()
-
     class Meta:
         model = Text
-        fields = ['id', 'created', 'website', 'content']
+        fields = ['id', 'created', 'url', 'content']
 
 
 class ImageSerializer(serializers.ModelSerializer):
 
     class Meta:
-        model = Text
-        fields = ['id', 'created', 'website', 'image']
+        model = Image
+        fields = ['id', 'created', 'url', 'file']
 
 
 class ResourceGenerationCreateSerializer(serializers.ModelSerializer):
 
-    # status = serializers.CharField(source='get_status_label')
-    # website = serializers.CharField(source='website.domain')
+    status = serializers.SerializerMethodField()
 
     class Meta:
         model = ResourceGeneration
-        fields = ['url', ]
-        # read_only_fields = ['created', 'date_start', 'date_end', 'status', ]
+        fields = ['url', 'status']
+
+    def get_status(self, instance):
+        return instance.get_status_label()
+
