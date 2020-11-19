@@ -12,7 +12,8 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet, GenericViewSet
 
-from scrapper.models import Text, Image, ResourceGeneration, ResourceGenerationStatusChoices
+from scrapper.models import Text, Image, ResourceGeneration
+from scrapper.choices import ResourceGenerationStatusChoices
 from scrapper.serializers import TextSerializer, ResourceGenerationCreateSerializer, ImageSerializer
 
 

@@ -1,19 +1,10 @@
 import os
-from io import BytesIO
-from urllib.error import URLError
 
 from django.conf import settings
-from django.core.files.base import ContentFile
 from django.db import models, transaction, IntegrityError
 
-import requests
-from bs4 import BeautifulSoup
-
-# Create your models here.
-from requests import RequestException
-from rest_framework.exceptions import ParseError, ValidationError
-import urllib.request
-from django.core.files import File
+from scrapper import utils
+from scrapper.choices import ResourceGenerationStatusChoices
 
 
 class Text(models.Model):
@@ -30,32 +21,6 @@ class Image(models.Model):
     url = models.URLField(blank=False, max_length=1000)
     file = models.FileField(unique=True, blank=True, null=True)
     generated_by = models.ForeignKey('ResourceGeneration', on_delete=models.DO_NOTHING, related_name='generated_images', null=True)
-
-
-class ResourceGenerationStatusChoices():
-
-    STARTED_GENERATION = 0
-    STARTED_GENERATION_LABEL = 'Started generation'
-    GENERATED = 1
-    GENERATED_LABEL = 'Generated'
-    ERROR = 10
-    ERROR_LABEL = 'Error'
-
-    choices = (
-        (STARTED_GENERATION, STARTED_GENERATION_LABEL),
-        (GENERATED, GENERATED_LABEL),
-        (ERROR, ERROR_LABEL),
-    )
-
-    @classmethod
-    def get_label_for_choice(cls, choice):
-        return cls.get_choices_dict()[choice]
-
-    @classmethod
-    def get_choices_dict(cls):
-        return {
-            val[0]: val[1] for val in cls.choices
-        }
 
 
 class ResourceGeneration(models.Model):
@@ -102,26 +67,10 @@ class ResourceGeneration(models.Model):
         return self.directory + 'texts'
 
     def save_texts(self):
-        try:
-            html = requests.get(self.url).text
-        except RequestException:
-            raise ValidationError(detail="Invalid URL provided")
-
-        soup = BeautifulSoup(html, features="html.parser")
-
-        for script in soup(["script", "style"]):
-            script.extract()  # rip it out
-
-        html_text = soup.get_text()
-
-        lines = [
-            line.strip()
-            for line in html_text.splitlines()
-            if line
-        ]
+        lines = utils.get_text_lines_for_url(self.url)
         text_cleaned = "\n".join(lines)
 
-        self.save_texts_file(text_cleaned)
+        utils.save_texts_file(text_cleaned, path=self.get_path_texts())
         self.save_texts_objects(lines)
 
     def create_and_get_directory_for_resources(self):
@@ -132,29 +81,17 @@ class ResourceGeneration(models.Model):
             os.mkdir(resources_path)
         return resources_path
 
-    def save_texts_file(self, file_text_content):
-        text_file = open(self.get_path_texts(), "w+")
-        text_file.write(file_text_content)
-        text_file.close()
-
     def save_images(self):
-        try:
-            html = requests.get(self.url).text
-        except RequestException:
-            raise ValidationError(detail="Invalid URL provided")
 
-        soup = BeautifulSoup(html, features="html.parser")
-
-        images = soup.findAll('img')
-        images_sources = [image.attrs['src'] for image in images]
+        images_sources = utils.get_image_sources(self.url)
 
         for url in images_sources:
-            image_file = self.get_remote_image(url)
+            image_file = utils.get_remote_image(url)
             image_object = Image(url=url, generated_by=self)
             try:
                 image_object.save()
             except IntegrityError as e:
-                pass
+                pass  # it was just saved before
             image_object.file.save(
                 self.get_directory_images(),
                 image_file,
@@ -172,24 +109,3 @@ class ResourceGeneration(models.Model):
         with transaction.atomic():
             result = Text.objects.bulk_create(texts)
             return result
-
-    @staticmethod
-    def get_remote_image(image_url):
-        image_url = image_url.strip()
-        if image_url.startswith('https'):
-            image_url_replaced = image_url.replace('https', 'http')
-        elif image_url.startswith("//"):
-            image_url_replaced = ''.join(
-                ["http:", image_url]
-            )
-        else:
-            image_url_replaced = image_url
-
-        try:
-            result = urllib.request.urlretrieve(image_url_replaced)  # image_ur
-        except ValueError as e:
-            raise
-        except URLError as e:
-            raise
-        else:
-            return File(open(result[0], 'rb'))
